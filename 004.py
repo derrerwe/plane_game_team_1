@@ -2,7 +2,6 @@ import random
 import time
 import pygame
 from pygame.locals import *
-#运行后无法很快就退出了 敌机子弹类没有初始化精灵类
 class HeroPlane(pygame.sprite.Sprite):
     #存放所有飞机子弹的组
     bullets = pygame.sprite.Group()#实现子弹打敌机爆炸的功能
@@ -57,6 +56,8 @@ class EnemyPlane(pygame.sprite.Sprite):
     # 存放子弹的精灵组
     enemy_bullets = pygame.sprite.Group()
     def __init__(self, screen):
+        #修正，调用父类初始化
+        pygame.sprite.Sprite.__init__(self)
         # 记录当前窗口对象
         self.screen = screen
         self.player = pygame.image.load("D:\\code_python\\plane game\\飞机大战素材\\images\\enemy1.png")  # 57*43
