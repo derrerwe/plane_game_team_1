@@ -265,7 +265,7 @@ class AnimatedModeGame:
         self.is_changing_mode = True
         self.mode_button.config(state=tk.DISABLED)  # 禁用按钮
 
-        # 显示过渡遮罩
+        # 显示过
         self.canvas.itemconfig(self.mode_overlay, state=tk.NORMAL)
         self.canvas.itemconfig(self.mode_overlay, fill="black")
 
