@@ -467,7 +467,7 @@ class Manager(object):
             iscollide = pygame.sprite.groupcollide(
                 self.players,
                 self.enemies,
-                True,  # 玩家碰撞后消失（但我们在take_damage中处理）
+                False,  # 玩家碰撞后自动移除（有生命值逻辑控制）
                 True,  # 敌机碰撞后消失
                 pygame.sprite.collide_mask  # 使用掩码检测
             )
@@ -495,6 +495,11 @@ class Manager(object):
                     for enemy in enemies_hit:
                         self.enemy_bomb.action(enemy.rect)
                         self.sound.playBombSound()
+            # 游戏结束时清空所有敌机
+            if Manager.is_game_over and self.players.sprites() == []:
+                # 玩家已清除，且游戏处于结束状态时，清空敌机
+                self.enemies.empty()
+                EnemyPlane.enemy_bullets.empty()
             #玩家和子弹的显示
             self.players.update()
             #敌机和子弹的显示
