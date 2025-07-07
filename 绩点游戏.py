@@ -506,54 +506,55 @@ class Manager(object):
     def check_collision(self):
         if not self.players or Manager.is_game_over:
             return
+
         player = self.players.sprites()[0]
-        #设置临界距离
-        critical_distance=40
-        near_objects=[]
-        for obj in self.random_bullets.sprites():
-            #计算玩家和物体的中心直线距离
-            dx=player.rect.centerx-obj.rect.centerx
-            dy=player.rect.centery-obj.rect.centery
-            distance=(dx**2+dy**2)**0.5
-            if distance<critical_distance:
-                near_objects.append(obj)
-        #处理空格键，消灭即将碰撞的物体，并得分
-        keys=pygame.key.get_pressed()
-        if keys[K_SPACE] and near_objects:
+
+        # 优化1：使用更高效的空间键攻击检测
+        keys = pygame.key.get_pressed()
+        if keys[K_SPACE]:
+            # 获取所有在攻击范围内的子弹
+            attack_radius = 100  # 攻击范围半径
+            near_objects = [obj for obj in self.random_bullets.sprites()
+                            if pygame.sprite.collide_circle_ratio(0.7)(player, obj)]
+
             for obj in near_objects:
-                #生成爆炸特效
-                bomb=Bomb(self.screen,"enemy")
+                # 生成爆炸特效
+                bomb = Bomb(self.screen, "enemy")
                 bomb.action(obj.rect)
                 self.bullet_bombs.append(bomb)
-                #加分并销毁子弹
-                player.score+=10
+
+                # 加分并销毁子弹
+                player.score += 10
                 obj.kill()
                 self.sound.playBombSound()
-        #处理实际碰撞（未按空格）
+
+        # 优化2：更精确的碰撞检测
+        # 使用分组碰撞检测提高效率
         collisions = pygame.sprite.spritecollide(
             player, self.random_bullets, True, pygame.sprite.collide_mask
         )
+
         if collisions:
-            #减分（最低0分）
-            player.score=max(0,player.score-5)
-            #玩家受伤
-            if player.take_damage():
+            # 优化3：根据碰撞严重程度计算伤害
+            damage = min(len(collisions), 3)  # 每次最多受到3点伤害
+            player.score = max(0, player.score - damage * 5)
+
+            # 玩家受伤
+            if player.take_damage(damage):
                 Manager.is_game_over = True
-                pygame.time.set_timer(Manager.create_bullet_id, 0)  # 停止生成子弹
-                #pygame.time.set_timer(Manager.game_over_id, 1000)
+                pygame.time.set_timer(Manager.create_bullet_id, 0)
                 self.player_bomb.action(player.rect)
                 self.sound.playBombSound()
                 self.players.remove(player)
+
                 # 游戏结束时检查结局
                 ending = self.story_manager.check_ending()
                 if ending:
-                    self.game_state = "ending"  # 进入结局展示状态
+                    self.game_state = "ending"
                     self.story_manager.start_ending(ending)
                 else:
-                    # 默认bad ending
                     self.game_state = "ending"
                     self.story_manager.start_ending("bad")
-
 
     def show_ending_gallery(self):
         """显示已解锁的结局"""
