@@ -1,25 +1,57 @@
 import random
 import time
+from turtledemo.clock import current_day
+
 import cv2
 import pygame
 from pygame.locals import *
-# screen：游戏窗口对象
-# player：玩家飞机图片
-# rect：飞机位置和尺寸的矩形对象
-# speed：飞机移动速度
-# bullets：玩家子弹精灵组
-# key_control()：处理键盘事件（WASD 或方向键移动，空格发射子弹）
-# update()：更新飞机状态并显示
-# display()：绘制飞机和子弹
-# clear_bullets()：清空所有子弹（类方法）
+
+class Button:
+    def __init__(self,x,y,width,height,text,color,hover_color,action=None):
+        self.rect=pygame.Rect(x,y,width,height)
+        self.text=text
+        self.color=color
+        self.hover_color=hover_color
+        self.action=action#按钮点击后执行的函数
+        self.current_color=color
+        self.border_width=2
+        self.border_color=(255,255,255)
+        self.font=pygame.font.SysFont("SimHei", 30)
+    def draw(self,screen):
+        #检查鼠标是否悬停在按钮上
+        if self.rect.collidepoint(pygame.mouse.get_pos()):
+            self.current_color=self.hover_color
+        else:
+            self.current_color=self.color
+        #绘制按钮背景
+        pygame.draw.rect(screen,self.current_color,self.rect,border_radius=15)#圆角是15
+        pygame.draw.rect(screen,self.border_color,self.rect,border_radius=15,width=self.border_width)
+
+        #绘制按钮文本
+        text_surface=self.font.render(self.text,True,(255,255,255))
+        text_rect=text_surface.get_rect(center=self.rect.center)
+        screen.blit(text_surface,text_rect)
+    def handle_event(self,event):
+        #处理按钮点击事件
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button==1 and self.rect.collidepoint(event.pos):
+                if self.action:
+                    self.action()
+                return True
+        return False
+
 class VideoPlayer:
     def __init__(self,screen,position=(0,0),size=None):
         self.screen = screen
         self.position = position
         self.size = size
-        self.video_path=""#
+        self.load_failed=False
+        self.video_path=r"D:\code_python\plane_game_team_1\素材库\测试视频.mp4"#
+        self.video_ended=False#标记视频是否播放完毕
         try:
             self.cap=cv2.VideoCapture(self.video_path)
+            if not self.cap.isOpened():
+                raise IOError("Cannot open video file")
             self.original_width=int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             self.original_height=int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             self.size=size or (self.original_width,self.original_height)
@@ -30,6 +62,7 @@ class VideoPlayer:
         except Exception as e:
             print(f"视频加载失败;{e}")
             self.playing=False
+            self.load_failed=True
     def play(self):
         self.playing=True
         self.last_frame_time=pygame.time.get_ticks()#记录当前时间,作为播放开始的基准时间，用于控制视频帧率，确保视频按正常速度播放（避免因游戏帧率波动导致视频播放过快或过慢）
@@ -37,7 +70,7 @@ class VideoPlayer:
         if not self.playing:#检查播放器状态
             return
         current_time=pygame.time.get_ticks()
-        if current_time-self.last_frame_time>self.frame_delay:#计算与上一帧的时间差，若小于预设的帧延迟则跳过本次更新，保持原有的播放速度
+        if current_time-self.last_frame_time<self.frame_delay:#计算与上一帧的时间差，若小于预设的帧延迟则跳过本次更新，保持原有的播放速度
             return
         self.last_frame_time=current_time#更新上一帧的时间为当前时间，为下一帧延迟计算做准备
         ret,frame=self.cap.read()#读取视频帧,frame时OpenCV格式的视频帧（numpy数组，BGR格式）
@@ -50,23 +83,27 @@ class VideoPlayer:
                     return
             else:#不循环播放，则停止播放
                 self.playing=False
+                self.video_ended=True#标记视频结束
                 return
         rgb_frame=cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)#将BGR转换成RGB格式
-        pygame_surface=pygame.surfarray.make_surface(rgb_frame.swapaxes(0,1))#将numpy数组转换成Pygame可渲染的Surface对象，swapaxes交换数组的维度（OpenCV的帧是【高度，宽度，通道】）需转换成【宽度，高度，通道】
+        pygame_surface=pygame.surfarray.make_surface(rgb_frame.swapaxes(0,1))#将numpy数组转换成Pygame可渲染的Surface对象，
+        # swapaxes交换数组的维度（OpenCV的帧是【高度，宽度，通道】）需转换成【宽度，高度，通道】
         if self.size!=(self.original_width,self.original_height):#若需要调整视频的尺寸，缩放Surface
-            pygame_surface=pygame.transform.scale(pygame_surface,(self.size,self.size))
+            pygame_surface=pygame.transform.scale(pygame_surface,self.size)
         self.screen.blit(pygame_surface,self.position)#将处理后的视频帧绘制到Pygame屏幕指定位置(self.position)
+    def is_video_ended(self):
+        return self.video_ended and not self.playing
 class HeroPlane(pygame.sprite.Sprite):
     #存放所有飞机子弹的组
-    bullets = pygame.sprite.Group()#实现子弹打敌机爆炸的功能
+    bullets = pygame.sprite.Group()
     def __init__(self,screen):
         pygame.sprite.Sprite.__init__(self)
         #记录当前窗口对象
         self.screen = screen
         #===创建一个玩家飞机图片，当作真正的飞机
-        self.player = pygame.image.load("D:\\code_python\\plane game\\飞机大战素材\\images\\me1.png")
+        self.image = pygame.image.load("D:\\code_python\\plane game\\飞机大战素材\\images\\me1.png")
         #根据图片获取矩形对象
-        self.rect = self.player.get_rect()
+        self.rect = self.image.get_rect()
         self.rect.topleft = [Manager.bg_size[0]/2-100/2,500]#x,y
         #飞机速度
         self.speed = 10
@@ -77,7 +114,7 @@ class HeroPlane(pygame.sprite.Sprite):
         self.current_hp=self.max_hp#初始化
         self.score=0
         #新增掩码
-        self.mask=pygame.mask.from_surface(self.player)
+        self.mask=pygame.mask.from_surface(self.image)
     #新增受伤方法
     def take_damage(self,damage=1):
         """玩家受伤，减少生命值"""
@@ -110,7 +147,7 @@ class HeroPlane(pygame.sprite.Sprite):
         self.display()
     def display(self):
         # 将飞机图片贴到窗口中
-        self.screen.blit(self.player,self.rect)
+        self.screen.blit(self.image,self.rect)
         #更新子弹坐标
         self.bullets.update()
         #把所有子弹全部添加到屏幕
@@ -138,7 +175,7 @@ class RandomBullet(pygame.sprite.Sprite):
         self.rect.x = random.randint(0, Manager.bg_size[0] - self.rect.width)
         self.rect.y = -self.rect.height  # 从屏幕外进入
         self.screen = screen
-        self.speed = random.randint(5, 12)  # 随机速度
+        self.speed = random.randint(3, 8)  # 随机速度
         self.mask = pygame.mask.from_surface(self.image)
         # self.rect.topleft = [x,y]
         # #窗口
@@ -216,19 +253,126 @@ class GameBackground(object):
             self.y1=0
         if self.y2>=0:#第二张照片移到窗口开始的地方
             self.y2=-Manager.bg_size[1]
-# 初始化：创建游戏窗口、背景、精灵组等
-# 事件处理：
-# 监听窗口关闭事件
-# 处理敌机创建定时器（每隔 1 秒生成一架敌机）
-# 游戏结束倒计时
-# 碰撞检测：
-# 玩家子弹与敌机碰撞
-# 敌机子弹与玩家碰撞
-# 玩家飞机与敌机直接碰撞
-# 游戏状态管理：
-# 游戏结束判定与处理
-# 重新开始游戏逻辑
-# 分数显示（目前仅显示文字框架，未实现计分逻辑）
+class SaveSystem:
+    @staticmethod
+    def save_endings(unlocked_endings):
+        try:
+            with open("endings.save", "w") as f:
+                f.write(",".join([k for k, v in unlocked_endings.items() if v]))
+        except:
+            print("存档失败")
+
+    @staticmethod
+    def load_endings():
+        try:
+            with open("endings.save", "r") as f:
+                data = f.read().split(",")
+                return {ending: True for ending in data}
+        except:
+            print("读取存档失败")
+            return {
+                "ending_bad": False,
+                "ending_normal": False,
+                "ending_good": False,
+                "ending_secret": False
+            }
+class StoryManager:
+    def __init__(self,Manager):
+        self.manager=Manager
+        self.current_story=None
+        self.current_line=0
+        self.story_progress=0
+        self.story_active=False
+        self.text_box_rect=pygame.Rect(50,Manager.bg_size[1]-150,Manager.bg_size[0]-100,120)
+        self.text_font=pygame.font.SysFont("Arial",20)
+        self.name_font=pygame.font.SysFont("Arial",28,bold=True)
+        self.unlocked_endings = SaveSystem.load_endings()
+        #样例
+        # 仅保留结局相关剧情
+        self.endings = {
+            "bad": {
+                "condition": lambda: self.manager.get_player_score() < 200,
+                "unlocked": False,
+                "lines": [
+                    {"name": "系统", "text": "任务失败...城市遭受了严重破坏"},
+                    {"name": "系统", "text": "结局评级：D [分数<200]"}
+                ]
+            },
+            "normal": {
+                "condition": lambda: 200 <= self.manager.get_player_score() < 500,
+                "unlocked": False,
+                "lines": [
+                    {"name": "系统", "text": "任务完成！基本保护了城市安全"},
+                    {"name": "系统", "text": "结局评级：B [200≤分数<500]"}
+                ]
+            },
+            "good": {
+                "condition": lambda: self.manager.get_player_score() >= 500,
+                "unlocked": False,
+                "lines": [
+                    {"name": "系统", "text": "杰出表现！完美保护了城市"},
+                    {"name": "系统", "text": "结局评级：A [分数≥500]"}
+                ]
+            },
+            "perfect": {
+                "condition": lambda: (self.manager.get_player_score() >= 800
+                                      and self.manager.get_player_damage_count() == 0),
+                "unlocked": False,
+                "lines": [
+                    {"name": "系统", "text": "完美无缺！创造了新的防御记录"},
+                    {"name": "系统", "text": "结局评级：S [分数≥800且零伤亡]"}
+                ]
+            }
+        }
+
+    def check_ending(self):
+        """检查并返回达成的结局"""
+        for ending_name, ending in self.endings.items():
+            if ending["condition"]() and not ending["unlocked"]:
+                ending["unlocked"] = True
+                return ending_name
+        return None
+
+    def start_ending(self, ending_name):
+        """开始播放结局剧情"""
+        if ending_name in self.endings:
+            self.current_story = self.endings[ending_name]["lines"]
+            self.current_line = 0
+            self.story_active = True
+            return True
+        return False
+
+    def next_line(self):
+        """推进到下一句对话"""
+        if self.current_story and self.current_line < len(self.current_story) - 1:
+            self.current_line += 1
+            return True
+        else:
+            self.story_active = False
+            return False
+
+    def draw_story(self, screen):
+        """绘制剧情对话框"""
+        if not self.story_active or not self.current_story:
+            return
+
+        # 绘制半透明背景框
+        s = pygame.Surface((self.text_box_rect.width, self.text_box_rect.height), pygame.SRCALPHA)
+        s.fill((0, 0, 0, 200))
+        screen.blit(s, self.text_box_rect.topleft)
+
+        # 绘制当前对话
+        line_data = self.current_story[self.current_line]
+        name_text = self.name_font.render(line_data["name"], True, (255, 215, 0))
+        screen.blit(name_text, (self.text_box_rect.x + 20, self.text_box_rect.y + 10))
+
+        text = line_data["text"]
+        text_surface = self.text_font.render(text, True, (255, 255, 255))
+        screen.blit(text_surface, (self.text_box_rect.x + 20, self.text_box_rect.y + 50))
+
+        # 绘制提示文本
+        prompt = self.text_font.render("按空格键继续...", True, (200, 200, 200))
+        screen.blit(prompt, (self.text_box_rect.right - 150, self.text_box_rect.bottom - 30))
 class Manager(object):
     bg_size=(500,889)#地图的像素
     #创建敌机定时器的id
@@ -239,7 +383,6 @@ class Manager(object):
     is_game_over=False
     #倒计时时间,重开游戏的倒计时
     over_time=3
-
     def __init__(self):
         pygame.init()
         self.screen = pygame.display.set_mode(Manager.bg_size,0,32)#像素，位深
@@ -250,28 +393,64 @@ class Manager(object):
         self.bullet_bombs=[]
         self.sound=GameSound()
         pygame.font.init()
-        self.font=pygame.font.SysFont("comicsans",50)
+        self.font=pygame.font.SysFont("SimHei",50)
         self.video_player=VideoPlayer(self.screen,position=(0,0),size=Manager.bg_size)
-        self.video_player.play()#开始播放视频
-    def exit(self):
-        print("退出")
-        pygame.quit()
-        exit()
-    def show_over_text(self):
-        #游戏结束，倒计时后重新开始
-        self.drawText('game over %d'%Manager.over_time,100,Manager.bg_size[0]/2,textHeight=50,fontColor=[255,0,0])
-    def game_over_timer(self):
-        self.show_over_text()
-        #倒计时-1
-        Manager.over_time-=1
-        if Manager.over_time<=0:
-            #参数2改为0，定时间停止
-            pygame.time.set_timer(Manager.game_over_id,0)
-            #倒计时后重新开始
-            Manager.over_time=3
-            self.start_game()
-            self.bullet_bombs.clear()  # 清空残留的爆炸特效
+        #self.video_player.play()
+        #游戏状态
+        self.game_state="start_menu"
+        #创建按钮
+        self.buttons=self.create_buttons()
+        self.game_over_timer=0
+        self.story_manager=StoryManager(self)
+    def create_buttons(self):
+        button_width = 200
+        button_height = 60
+        center_x=Manager.bg_size[0]//2-button_width//2
+        button_y = Manager.bg_size[1] // 2
+        return{
+            "start_video":Button(center_x,button_y,button_width,button_height,"开始游戏",(50,150,50),(100,200,100),self.go_to_intro),
+            "start_game":Button(center_x,button_y,button_width,button_height,"开始游戏",(50,150,50),(100,200,100),self.start_game),
+            "continue_after_video":Button(center_x,button_y,button_width,button_height,"继续前进",(50,150,50),(100,200,100),self.go_to_intro_end),
+            "paused":Button(center_x,button_y,button_width,button_height,"暂停游戏",(50,150,50),(100,200,100),self.pause_game),
+            "quit":Button(center_x,button_y+80,button_width,button_height,"退出游戏",(50,150,50),(100,200,100),self.quit_game),
+            "resume":Button(center_x,button_y,button_width,button_height,"继续游戏",(50,150,50),(100,200,100),self.resume_game),
+            "setting":Button(center_x+120,button_y+400,button_width,button_height,"菜单",(50,150,50),(100,200,100),self.pause_game),
+            #"game_over":Button(center_x,button_y,button_width,button_height,"退出游戏",(50,150,50),(100,200,100)),
+            "restart":Button(center_x,button_y,button_width,button_height,"重新开始",(50,150,50),(100,200,100),self.restart_game),
+            "gallery": Button(center_x, button_y + 160, button_width, button_height,
+                              "结局画廊", (100, 50, 150), (150, 100, 200), self.show_ending_gallery)
+            #"start_video":Button(center_x,button_y,button_width,button_height,"开始游戏",(50,150,50),(100,200,100)),
+            }
+    #界面一进入视频
+    #界面二进入游戏
+    #界面三可以进行游戏暂停等功能
+    def play_intro_video(self):
+        self.game_state="intro"
+        self.video_player.play()
+        # video_clock=pygame.time.Clock()
+        # while  self.game_state=="intro":
+        #     for event in pygame.event.get():
+        #         if event.type == pygame.QUIT:
+        #             pygame.quit()
+        #             exit()
+        #         elif event.type == pygame.KEYDOWN:
+        #             if event.key == pygame.K_ESCAPE:
+        #                 self.game_state="continue_after_video"
+        #                 return
+    def go_to_intro(self):
+        self.game_state="intro"
+        #self.video_player.playing=True
+        self.start_video()
+    def go_to_intro_end(self):
+        self.game_state="continue_after_video"
+    def start_video(self):
+        self.video_player.play()
+
+
+
     def start_game(self):
+        #if self.game_state=="menu":
+        self.game_state="playing"
         Manager.is_game_over=False
         #重新开始游戏，有些类属性要清空
         self.players.empty()
@@ -280,6 +459,37 @@ class Manager(object):
         HeroPlane.clear_bullets()
         self.new_player()
         pygame.time.set_timer(Manager.create_bullet_id,100)
+    def restart_game(self):
+        self.start_game()
+        self.game_over_timer=0
+    def pause_game(self):
+        #self.game_state="paused"
+        if self.game_state=="playing":
+            self.game_state = "paused"
+            pygame.time.set_timer(Manager.create_bullet_id,0)
+        elif self.game_state=="paused":
+            self.game_state = "playing"
+            pygame.time.set_timer(Manager.create_bullet_id,100)
+    def resume_game(self):
+
+        self.game_state="playing"
+        pygame.time.set_timer(Manager.create_bullet_id,100)
+
+    def quit_game(self):
+
+        pygame.quit()
+        exit()
+
+    def get_player_score(self):
+        if self.players.sprites():
+            return self.players.sprites()[0].score
+        return 0
+
+    def get_player_damage_count(self):
+        if self.players.sprites():
+            player = self.players.sprites()[0]
+            return player.max_hp - player.current_hp
+        return 0
     def new_player(self):
         #创建飞机对象。添加到玩家的组
         player=HeroPlane(self.screen)
@@ -330,10 +540,48 @@ class Manager(object):
             if player.take_damage():
                 Manager.is_game_over = True
                 pygame.time.set_timer(Manager.create_bullet_id, 0)  # 停止生成子弹
-                pygame.time.set_timer(Manager.game_over_id, 1000)
+                #pygame.time.set_timer(Manager.game_over_id, 1000)
                 self.player_bomb.action(player.rect)
                 self.sound.playBombSound()
                 self.players.remove(player)
+                # 游戏结束时检查结局
+                ending = self.story_manager.check_ending()
+                if ending:
+                    self.game_state = "ending"  # 进入结局展示状态
+                    self.story_manager.start_ending(ending)
+                else:
+                    # 默认bad ending
+                    self.game_state = "ending"
+                    self.story_manager.start_ending("bad")
+
+
+    def show_ending_gallery(self):
+        """显示已解锁的结局"""
+        self.screen.fill((0, 0, 0))
+        self.drawText("结局画廊", 150, 50, textHeight=60)
+
+        endings = [
+            ("bad", "D级结局", "分数<200", (100, 150)),
+            ("normal", "B级结局", "200≤分数<500", (100, 220)),
+            ("good", "A级结局", "分数≥500", (100, 290)),
+            ("perfect", "S级结局", "分数≥800且零伤亡", (100, 360))
+        ]
+
+        for ending_id, title, condition, pos in endings:
+            # 检查是否已解锁
+            unlocked = self.story_manager.endings[ending_id]["unlocked"]
+            color = (0, 255, 0) if unlocked else (100, 100, 100)
+
+            # 绘制结局标题和状态
+            status = "(已解锁)" if unlocked else "(未解锁)"
+            self.drawText(f"{title} {status}", pos[0], pos[1], fontColor=color)
+
+            # 绘制解锁条件
+            if not unlocked:
+                self.drawText(f"解锁条件: {condition}", pos[0] + 250, pos[1],
+                              textHeight=20, fontColor=(150, 150, 150))
+
+        self.drawText("按ESC返回主菜单", 150, Manager.bg_size[1] - 50, textHeight=30)
     def drawText(self,text,x,y,textHeight=30,fontColor=(255,255,0),backgroudColor=None):
         #通过字体文件获取字体对象
         font_obj=pygame.font.SysFont("SimHei",textHeight)
@@ -345,52 +593,126 @@ class Manager(object):
         text_rect.topleft=(x,y)
         #绘制字到指定的区域
         self.screen.blit(text_obj,text_rect)
-    def main(self):
-        #播放背景音乐
-        self.sound.playBackgroundMusic()
-        #开始游戏
-        self.start_game()
-        #创建时钟对象
-        clock=pygame.time.Clock()
-        while True:
-            # 遍历所有的事件
-            for event in pygame.event.get():
-                # 判断事件类型
-                if event.type == Manager.create_bullet_id:
-                    self.create_random_bullet()
-                elif event.type == QUIT:
-                    self.exit()
-                elif event.type == Manager.game_over_id:
-                    # 电定时器触发的事件
-                    self.game_over_timer()
-            #把背景图片贴到窗口
-            #self.screen.blit(self.background, (0, 0))
-            #移动地图
+    def handle_events(self):
+        #处理事件
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    if self.game_state == "gallery":
+                        self.game_state = "start_menu"
+                # 处理结局剧情的空格键继续
+                if event.key == pygame.K_SPACE and self.game_state == "ending":
+                    if not self.story_manager.next_line():
+                        self.game_state = "game_over"  # 剧情结束后进入游戏结束界面
+            elif event.type == Manager.create_bullet_id:
+                self.create_random_bullet()
+            #处理按钮
+            if self.game_state=="start_menu":#开始界面
+                self.buttons["start_video"].handle_event(event)
+                self.buttons["quit"].handle_event(event)
+            elif self.game_state=="start_video":
+                #播放视频
+                self.start_video()
+            elif self.game_state=="intro":
+                self.video_player.update()#更新视频帧
+                if event.type == pygame.KEYDOWN and event.key==pygame.K_ESCAPE:
+                    self.game_state="continue_after_video"
+                elif self.video_player.is_video_ended():
+                    self.game_state="continue_after_video"
+            elif self.game_state=="continue_after_video":
+                self.buttons["start_game"].handle_event(event)
+                self.buttons["quit"].handle_event(event)
+            elif self.game_state=="paused":
+                self.buttons["resume"].handle_event(event)
+                self.buttons["quit"].handle_event(event)
+            elif self.game_state=="playing":
+                self.buttons["setting"].handle_event(event)
+            elif self.game_state=="game_over":
+                self.buttons["restart"].handle_event(event)
+                self.buttons["quit"].handle_event(event)
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                if self.game_state == "story":
+                    if not self.story_manager.next_line():
+                        # 如果故事结束，检查是否需要触发特殊事件
+                        if self.story_manager.current_story == self.story_manager.stories["intro"]:
+                            self.start_game()
+    def buttons_draw(self):
+        if self.game_state=="start_menu":
+            self.screen.fill((0, 0, 0))
+            self.drawText("飞机游戏", 150, 200, textHeight=60)
+            self.buttons["start_video"].draw(self.screen)
+            self.buttons["quit"].draw(self.screen)
+        if self.game_state=="intro":
+            #视频播放时绘制视频帧
+            self.video_player.update()
+            skip_font=pygame.font.SysFont("SimHei",50)
+            skip_text=skip_font.render("按ESC跳过视频",True,(255,255,255))
+            self.screen.blit(skip_text,(Manager.bg_size[0] - 200, Manager.bg_size[1] - 40))
+        elif self.game_state=="continue_after_video":
+            self.screen.fill((0, 0, 0))
+            self.buttons["start_game"].draw(self.screen)
+            self.buttons["quit"].draw(self.screen)
+        elif self.game_state=="paused":
+            #半透明覆盖层
+            s=pygame.Surface(Manager.bg_size)
+            s.set_alpha(150)
+            s.fill((0,0,0))
+            self.screen.blit(s,(0,0))
+            self.drawText("游戏暂停", 150, 200, textHeight=60)
+            self.buttons["resume"].draw(self.screen)
+            self.buttons["quit"].draw(self.screen)
+        elif self.game_state=="playing":
             self.map.move()
-            #把地图贴到窗口上
             self.map.draw()
-            #绘制文字
+            self.buttons["setting"].draw(self.screen)
             if self.players:
                 player=self.players.sprites()[0]
-                self.drawText(f'分数：{player.score}',50,70,textHeight=30,fontColor=[255,255,0])#文字的内容，坐标
-            if Manager.is_game_over:
-                #判断游戏结束才显示结束文字
-                self.show_over_text()
-            else:
+                self.drawText(f'分数：{player.score}', 50, 70)
+                self.drawText(f'生命值: {player.current_hp}/{player.max_hp}', 50, 30, fontColor=(0, 255, 0))
+        elif self.game_state == "ending":
+            # 游戏结束时的结局剧情展示
+            self.map.move()
+            self.map.draw()
+            if self.players:
+                self.players.draw(self.screen)
+            self.story_manager.draw_story(self.screen)
+
+        elif self.game_state == "game_over":
+            # 结局剧情后的统计界面
+            s = pygame.Surface(Manager.bg_size)
+            s.set_alpha(150)
+            s.fill((0, 0, 0))
+            self.screen.blit(s, (0, 0))
+
+            self.drawText("游戏结束", 150, 200, textHeight=60)
+            if self.players.sprites():
+                player = self.players.sprites()[0]
+                self.drawText(f'最终分数: {player.score}', 150, 280)
+
+            # 显示重新开始和退出按钮
+            self.buttons["restart"].draw(self.screen)
+            self.buttons["quit"].draw(self.screen)
+    def main(self):
+        self.sound.playBackgroundMusic()
+        clock=pygame.time.Clock()
+        while True:
+            self.handle_events()
+            # 更新游戏状态
+            if Manager.is_game_over and self.game_state == "playing":
+                self.game_state = "game_over"
+            # 绘制当前状态界面
+            self.buttons_draw()
+            #游戏逻辑更新
+
+            if self.game_state == "playing":
                 if self.players:
                     self.players.update()
                 self.random_bullets.update()
                 self.random_bullets.draw(self.screen)
                 self.check_collision()
-                if self.players:  # 玩家存在时才显示
-                    player = self.players.sprites()[0]
-                    # 显示格式：HP: 3/3
-                    self.drawText(
-                        f'生命值: {player.current_hp}/{player.max_hp}',
-                        x=50, y=30,  # 位置（可调整）
-                        textHeight=30,
-                        fontColor=[0, 255, 0]  # 绿色文字
-                    )
             #绘制子弹爆炸特效
             for bomb in self.bullet_bombs[:]:
                 bomb.draw(self.screen)
@@ -402,127 +724,7 @@ class Manager(object):
             # 刷新窗口内容
             pygame.display.update()
             clock.tick_busy_loop(60)  # 使用pygame 1,x
-            self.video_player.update()#更新视频帧
-            #调用爆炸的对象
-            #self.enemy_bomb.draw()
-            #敌机子弹和玩家飞机的碰撞判断
-            # if self.players:
-            #     player = self.players.sprites()[0]
-            #     isover = pygame.sprite.spritecollide(
-            #         player,
-            #         EnemyPlane.enemy_bullets,
-            #         True,  # 碰撞后子弹消失
-            #         pygame.sprite.collide_mask  # 使用掩码检测
-            #     )
-            #     if isover and not Manager.is_game_over:#避免重复触发
-            #         #调用玩家受伤方法，判断是否死亡
-            #         is_dead=player.take_damage()
-            #         self.player_bomb.action(self.players.sprites()[0].rect)#显示受伤特效
-            #         self.sound.playBombSound()
-            #         if is_dead:#生命值归零时游戏结束
-            #             Manager.is_game_over=True#标志着游戏结束
-            #             pygame.time.set_timer(Manager.game_over_id,1000)#开始游戏倒计时
-            #             #print("中弹")#在控制台输出
-            #             self.player_bomb.action(self.players.sprites()[0].rect)#显示爆炸特效
-            #             #把玩家飞机从精灵组移除
-            #             self.players.remove(self.players.sprites()[0])
-            #             #爆炸的声音
-            #             self.sound.playBombSound()
-            # #玩家和敌机的碰撞检测(使用掩码）
-            # iscollide = pygame.sprite.groupcollide(
-            #     self.players,
-            #     self.enemies,
-            #     True,  # 玩家碰撞后消失（但我们在take_damage中处理）
-            #     True,  # 敌机碰撞后消失
-            #     pygame.sprite.collide_mask  # 使用掩码检测
-            # )
-            # if iscollide and not Manager.is_game_over:
-            #     # player=list(iscollide.keys())[0]#获取玩家
-            #     # enemy=list(iscollide.values())[0][0]#获取敌机
-            #     #碰撞造成2点伤害
-            #     is_dead=player.take_damage(damage=2)
-            #     #显示双方爆炸特效
-            #     # self.player_bomb.action(player.rect)
-            #     # self.enemy_bomb.action(enemy.rect)
-            #     # self.sound.playBombSound()
-            #     # if is_dead:
-            #     #     Manager.is_game_over=True#标志着游戏结束
-            #     #     pygame.time.set_timer(Manager.game_over_id,1000)#开启游戏倒计时
-            #
-            # #玩家子弹和所有敌机的碰撞判断
-            # is_enemy = pygame.sprite.groupcollide(
-            #     HeroPlane.bullets,
-            #     self.enemies,
-            #     True,  # 子弹碰撞后消失
-            #     True,  # 敌机碰撞后消失
-            #     pygame.sprite.collide_mask  # 使用掩码检测
-            # )
-            # if is_enemy:
-            #     items=list(is_enemy.items())[0]#生成一个字典
-            #     y=items[1][0]
-            #     #敌机爆炸图片
-            #     self.enemy_bomb.action(y.rect)
-            #     #爆炸的声音
-            #     self.sound.playBombSound()
-            #修改
-            # # 敌机子弹与玩家的碰撞检测
-            # if self.players:
-            #     player = self.players.sprites()[0]
-            #     isover = pygame.sprite.spritecollide(
-            #         player,
-            #         #EnemyPlane.enemy_bullets,
-            #         True,  # 碰撞后子弹消失
-            #         pygame.sprite.collide_mask  # 使用掩码检测
-            #     )
-            #     if isover and not Manager.is_game_over:
-            #         is_dead = player.take_damage()
-            #         self.player_bomb.action(player.rect)
-            #         self.sound.playBombSound()
-            #         if is_dead:
-            #             Manager.is_game_over = True
-            #             pygame.time.set_timer(Manager.game_over_id, 1000)
 
-            # # 玩家与敌机的碰撞检测
-            # iscollide = pygame.sprite.groupcollide(
-            #     self.players,
-            #     self.enemies,
-            #     False,  # 玩家碰撞后自动移除（有生命值逻辑控制）
-            #     True,  # 敌机碰撞后消失
-            #     pygame.sprite.collide_mask  # 使用掩码检测
-            # )
-            # if iscollide and not Manager.is_game_over:
-            #     player = list(iscollide.keys())[0]
-            #     enemy = list(iscollide.values())[0][0]
-            #     is_dead = player.take_damage(damage=2)
-            #     self.player_bomb.action(player.rect)
-            #     self.enemy_bomb.action(enemy.rect)
-            #     self.sound.playBombSound()
-            #     if is_dead:
-            #         Manager.is_game_over = True
-            #         pygame.time.set_timer(Manager.game_over_id, 1000)
-
-            # # 玩家子弹与敌机的碰撞检测
-            # is_enemy = pygame.sprite.groupcollide(
-            #     HeroPlane.bullets,
-            #     self.enemies,
-            #     True,  # 子弹碰撞后消失
-            #     True,  # 敌机碰撞后消失
-            #     pygame.sprite.collide_mask  # 使用掩码检测
-            # )
-            # if is_enemy:
-            #     for bullet, enemies_hit in is_enemy.items():
-            #         for enemy in enemies_hit:
-            #             self.enemy_bomb.action(enemy.rect)
-            #             self.sound.playBombSound()
-            # # 游戏结束时清空所有敌机
-            # if Manager.is_game_over and self.players.sprites() == []:
-            #     # 玩家已清除，且游戏处于结束状态时，清空敌机
-            #     self.enemies.empty()
-            #     EnemyPlane.enemy_bullets.empty()
-            #玩家和子弹的显示
-            #self.players.update()
-            #敌机和子弹的显示
-            #self.enemies.update()
 
 if __name__ == "__main__":
     manager = Manager()
